@@ -150,16 +150,18 @@ footer svg{width:12px;height:12px;fill:none;stroke:#b77e8e;stroke-width:1.5}
 .welcome-page .accent-line{white-space:nowrap}
 .welcome-page .verse{color:#8b5369}
 .welcome-page .mail-note{margin:12px auto}
+#welcome-fireworks{display:none;position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:-1}
+.welcome-page #welcome-fireworks{display:block}
+@media(prefers-reduced-motion:reduce){.welcome-page #welcome-fireworks{display:none}}
 .welcome-page .teddy-bubble,.welcome-page .teddy-bubble::after{background:#fff5f2;border-color:#e3a7b5}
 .welcome-balloons{display:none;position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:-1}
 .welcome-page .welcome-balloons{display:block}
-.welcome-balloon{position:absolute;width:var(--size);height:auto;animation:balloon-drift 6s ease-in-out infinite alternate;animation-delay:var(--delay);transform-origin:50% 40%}
-.welcome-balloon.peach{top:14.5%;left:8.7%;--size:46px;--delay:-2s;color:#e6a18e}
-.welcome-balloon.rose{top:46.6%;left:7.5%;--size:60px;--delay:-4s;color:#dc8daa}
-.welcome-balloon.coral{top:76.8%;left:1.6%;--size:47px;--delay:-1s;color:#e4a18e}
-.welcome-balloon.sky{top:32.2%;right:6.4%;--size:45px;--delay:-3s;color:#8eb7ca}
-.welcome-balloon.lilac{top:57.4%;right:7.7%;--size:45px;--delay:-5s;color:#b797c7}
-@keyframes balloon-drift{from{transform:translateY(2px) rotate(-2deg)}to{transform:translateY(-4px) rotate(2deg)}}
+.welcome-balloon{position:absolute;width:var(--size);height:auto;transform-origin:50% 40%}
+.welcome-balloon.peach{top:14.5%;left:8.7%;--size:46px;--flight:17s;--delay:-13.2s;color:#e6a18e}
+.welcome-balloon.rose{top:46.6%;left:7.5%;--size:60px;--flight:20s;--delay:-9.4s;color:#dc8daa}
+.welcome-balloon.coral{top:76.8%;left:1.6%;--size:47px;--flight:16s;--delay:-3.4s;color:#e4a18e}
+.welcome-balloon.sky{top:32.2%;right:6.4%;--size:45px;--flight:18s;--delay:-11.2s;color:#8eb7ca}
+.welcome-balloon.lilac{top:57.4%;right:7.7%;--size:45px;--flight:19s;--delay:-7.4s;color:#b797c7}
 @media(max-width:1180px){
   .welcome-balloon{width:calc(var(--size) * .72)}
   .welcome-balloon.peach,.welcome-balloon.rose{left:3%}
@@ -174,6 +176,23 @@ footer svg{width:12px;height:12px;fill:none;stroke:#b77e8e;stroke-width:1.5}
   .welcome-balloon.coral{top:83%}
   .welcome-balloon.sky{top:20%}
   .welcome-balloon.lilac{top:64%;right:1%}
+}
+@media(prefers-reduced-motion:no-preference){
+  .welcome-page .welcome-balloons{position:fixed;--sway:clamp(2px,.5vw,9px)}
+  .welcome-page .welcome-balloon{
+    top:100%;
+    animation:balloon-rise var(--flight) linear infinite,balloon-sway 3s ease-in-out infinite alternate;
+    animation-delay:var(--delay);
+  }
+  .welcome-page.celebration-paused .welcome-balloon{animation-play-state:paused}
+}
+@keyframes balloon-rise{
+  from{translate:0 8%}
+  to{translate:0 calc(-100vh - 115%);translate:0 calc(-100dvh - 115%)}
+}
+@keyframes balloon-sway{
+  from{transform:translateX(calc(-1 * var(--sway))) rotate(-3deg)}
+  to{transform:translateX(var(--sway)) rotate(3deg)}
 }
 
 /*
@@ -677,6 +696,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     </symbol>
   </svg>
   <div class="ambience" aria-hidden="true"><i>✧</i><i>♡</i><i>✧</i><i>♡</i><i>✧</i><i>✧</i></div>
+  <canvas id="welcome-fireworks" aria-hidden="true"></canvas>
   <div class="welcome-balloons" aria-hidden="true">
     <svg class="welcome-balloon peach" viewBox="0 0 64 132"><use href="#welcome-balloon"/></svg>
     <svg class="welcome-balloon rose" viewBox="0 0 64 132"><use href="#welcome-balloon"/></svg>
@@ -914,6 +934,169 @@ async function notifyAcceptance() {
   }
 }
 
+// Each shell rises on a short golden trail, then opens into two rings of falling sparks.
+const fireworksCanvas = el("welcome-fireworks");
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const fireworkColors = [
+  ["#bf4675", "#e0809e", "#b9873a"],
+  ["#598dac", "#96bacb", "#be9146"],
+  ["#a06cb0", "#cc8bb6", "#ca8c52"],
+  ["#cf705d", "#e39c78", "#b58332"]
+];
+const shells = [];
+let fireworksContext;
+let fireworksFrame = 0;
+let skyWidth = 0;
+let skyHeight = 0;
+let lastFrameTime = 0;
+let nextLaunchIn = 0;
+let launchIndex = 0;
+
+function resizeFireworks() {
+  skyWidth = fireworksCanvas.clientWidth;
+  skyHeight = fireworksCanvas.clientHeight;
+  const scale = Math.min(window.devicePixelRatio || 1, 1.5);
+  fireworksCanvas.width = Math.round(skyWidth * scale);
+  fireworksCanvas.height = Math.round(skyHeight * scale);
+  fireworksContext.setTransform(scale, 0, 0, scale, 0, 0);
+  fireworksContext.lineCap = "round";
+  shells.length = 0;
+  nextLaunchIn = 0;
+}
+
+function launchFirework() {
+  const compact = skyWidth <= 760 || skyHeight < 500;
+  const positions = skyWidth <= 760 && skyHeight > skyWidth
+    ? [[.22,.125], [.91,.29], [.15,.86], [.76,.13], [.09,.39], [.86,.85]]
+    : [[.16,.29], [.83,.24], [.10,.60], [.90,.52], [.49,.16], [.79,.76]];
+  const [x, y] = positions[launchIndex % positions.length];
+  const colors = fireworkColors[launchIndex % fireworkColors.length];
+  const size = Math.min(skyWidth * (compact ? .15 : .085), skyHeight * .14, 130);
+  const petals = compact ? 18 : 27;
+  const sparks = [];
+  const rotation = Math.random() * Math.PI;
+  for (let i = 0; i < petals * 2; i++) {
+    const inner = i >= petals;
+    const angle = rotation + (i + (inner ? .5 : 0) + Math.random() * .35) * Math.PI * 2 / petals;
+    const reach = size * (inner ? .46 : .86) * (.9 + Math.random() * .23);
+    sparks.push({
+      dx: Math.cos(angle) * reach, dy: Math.sin(angle) * reach,
+      color: inner ? colors[2] : colors[i % 2],
+      life: 1.25 + Math.random() * .53, glitter: i % 5 === 0
+    });
+  }
+  shells.push({
+    x: x * skyWidth, y: y * skyHeight, size, age: 0, sparks,
+    flight: .66 + Math.random() * .2,
+    rise: Math.min(skyHeight * .46, size * 3.4),
+    lean: size * (x < .5 ? -.45 : .45)
+  });
+  launchIndex++;
+}
+
+function drawFirework(shell) {
+  const ctx = fireworksContext;
+  const elapsed = shell.age - shell.flight;
+  if (elapsed < 0) {
+    const remaining = (1 - shell.age / shell.flight) ** 1.5;
+    const x = shell.x + shell.lean * remaining;
+    const y = shell.y + shell.rise * remaining;
+    const tail = .07 + .16 * remaining;
+    const trail = ctx.createLinearGradient(x, y, x + shell.lean * tail, y + shell.rise * tail);
+    trail.addColorStop(0, "#bc8345");
+    trail.addColorStop(1, "rgba(217,163,102,0)");
+    ctx.globalAlpha = Math.min(1, shell.age * 7);
+    ctx.strokeStyle = trail;
+    ctx.lineWidth = 1.7;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + shell.lean * tail, y + shell.rise * tail);
+    ctx.stroke();
+    ctx.fillStyle = "#d6a251";
+    ctx.beginPath();
+    ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  for (const spark of shell.sparks) {
+    const t = elapsed / spark.life;
+    if (t >= 1) continue;
+    const tail = Math.max(0, t - .17);
+    const reach = 1 - (1 - t) ** 2.5;
+    const tailReach = 1 - (1 - tail) ** 2.5;
+    const fall = shell.size * .35;
+    const x = shell.x + spark.dx * reach;
+    const y = shell.y + spark.dy * reach + fall * t * t;
+    ctx.globalAlpha = .92 * (1 - t * t);
+    ctx.lineWidth = 1 + (1 - t) * .8;
+    ctx.strokeStyle = spark.color;
+    ctx.beginPath();
+    ctx.moveTo(shell.x + spark.dx * tailReach, shell.y + spark.dy * tailReach + fall * tail * tail);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    if (spark.glitter) {
+      const gleam = (1 - t) * (2 + Math.sin(t * 18 + spark.dx));
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, y - gleam);
+      ctx.lineTo(x, y + gleam);
+      ctx.moveTo(x - gleam, y);
+      ctx.lineTo(x + gleam, y);
+      ctx.stroke();
+    }
+  }
+  if (elapsed < .32) {
+    ctx.globalAlpha = .8 * (1 - elapsed / .32);
+    ctx.fillStyle = "#e4b574";
+    ctx.beginPath();
+    ctx.arc(shell.x, shell.y, 1 + 9 * elapsed, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function animateFireworks(now) {
+  const dt = lastFrameTime ? Math.min((now - lastFrameTime) / 1000, .06) : 0;
+  lastFrameTime = now;
+  nextLaunchIn -= dt;
+  if (nextLaunchIn <= 0) {
+    launchFirework();
+    nextLaunchIn = launchIndex % 3 === 1 ? .62 : 1.5;
+  }
+  fireworksContext.clearRect(0, 0, skyWidth, skyHeight);
+  for (let i = shells.length - 1; i >= 0; i--) {
+    const shell = shells[i];
+    shell.age += dt;
+    if (shell.age > shell.flight + 1.8) shells.splice(i, 1);
+    else drawFirework(shell);
+  }
+  fireworksFrame = requestAnimationFrame(animateFireworks);
+}
+
+function syncCelebration() {
+  document.body.classList.toggle("celebration-paused", document.hidden);
+  if (chapterIndex !== welcomeIndex || reducedMotion.matches || document.hidden) {
+    if (fireworksFrame) {
+      cancelAnimationFrame(fireworksFrame);
+      fireworksContext.clearRect(0, 0, skyWidth, skyHeight);
+      shells.length = 0;
+      fireworksFrame = 0;
+    }
+    return;
+  }
+  if (fireworksFrame) return;
+  fireworksContext = fireworksCanvas.getContext("2d");
+  if (!fireworksContext) return;
+  resizeFireworks();
+  launchIndex = 0;
+  lastFrameTime = 0;
+  fireworksFrame = requestAnimationFrame(animateFireworks);
+}
+
+document.addEventListener("visibilitychange", syncCelebration);
+reducedMotion.addEventListener("change", syncCelebration);
+window.addEventListener("resize", () => { if (fireworksFrame) resizeFireworks(); });
+
 function render() {
   const teddyPage = chapterIndex === proposalIndex;
   const welcome = chapterIndex === welcomeIndex;
@@ -945,6 +1128,7 @@ function render() {
   letter.classList.toggle("teddy-page", teddyPage);
   letter.classList.toggle("asking", teddyPage && !showLaterLetter);
   document.body.classList.toggle("welcome-page", welcome);
+  syncCelebration();
   const wordmark = el("wordmark");
   if (welcome) {
     wordmark.setAttribute("href", "#title");
